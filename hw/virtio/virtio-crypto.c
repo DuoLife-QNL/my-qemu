@@ -50,8 +50,9 @@ virtio_crypto_cipher_session_helper(VirtIODevice *vdev,
 
     info->cipher_alg = ldl_le_p(&cipher_para->algo);
     info->key_len = ldl_le_p(&cipher_para->keylen);
-    info->direction = ldl_le_p(&cipher_para->op);             
-    trace_virtio_crypto_cipher_session_helper_cipher_alg_and_direction(info->cipher_alg, info->direction);
+    info->direction = ldl_le_p(&cipher_para->op);      
+    trace_virtio_crypto_cipher_session_helper_cipher_alg_and_direction(\
+    info->cipher_alg, info->direction);
 
     if (info->key_len > vcrypto->conf.max_cipher_key_len) {
         error_report("virtio-crypto length of cipher key is too big: %u",
