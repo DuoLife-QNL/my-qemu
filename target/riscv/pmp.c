@@ -399,6 +399,7 @@ void mseccfg_csr_write(CPURISCVState *env, target_ulong val)
     }
 
     val |= (env->mseccfg & PMP_MSECCFG_MMWP);
+    val |= (env->mseccfg & PMP_MSECCFG_MML);
 
     env->mseccfg = val;
     // todo: trace
