@@ -387,6 +387,19 @@ target_ulong pmpaddr_csr_read(CPURISCVState *env, uint32_t addr_index)
  */
 void mseccfg_csr_write(CPURISCVState *env, target_ulong val)
 {
+    int i;
+
+    if (!(env->mseccfg & PMP_MSECCFG_RLB)) {
+        for (i = 0; i < env->pmp_state.num_rules; i++) {
+            if (pmp_is_locked(env, i)) {
+                val &= ~PMP_MSECCFG_RLB;
+                val |= (env->mseccfg & PMP_MSECCFG_RLB);
+                break;
+            }
+        }
+    }
+
+
     env->mseccfg = val;
     // todo: trace
 }
