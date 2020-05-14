@@ -230,7 +230,7 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
 
     /* Short cut if no rules */
     if (0 == pmp_get_num_rules(env)) {
-        return mode == PRV_M && (env->mseccfg & PMP_MSECCFG_MMWP);
+        return mode != PRV_M || !(env->mseccfg & PMP_MSECCFG_MMWP);
     }
 
     /*
