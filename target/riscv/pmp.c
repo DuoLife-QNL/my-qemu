@@ -265,10 +265,36 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
          * If the PMP entry is not off and the address is in range, do the priv
          * check
          */
-        if (((s + e) == 2) && (PMP_AMATCH_OFF != a_field)) {
-            allowed_privs = PMP_READ | PMP_WRITE | PMP_EXEC;
-            if ((mode != PRV_M) || pmp_is_locked(env, i)) {
-                allowed_privs &= env->pmp_state.pmp[i].cfg_reg;
+        if (((s + e) == 2)) {
+             if (PMP_AMATCH_OFF != a_field) {
+                allowed_privs = PMP_READ | PMP_WRITE | PMP_EXEC;
+                if ((mode != PRV_M) || pmp_is_locked(env, i)) {
+                    allowed_privs &= env->pmp_state.pmp[i].cfg_reg;
+                }
+            } else if (env->mseccfg & PMP_MSECCFG_MML) {
+                if (pmp_is_locked(env, i)) {
+                    if ((env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE)) == PMP_WRITE) { // Shared Region
+                        allowed_privs = PMP_EXEC | (PRV_M ? PMP_READ : 0);
+                    } else {
+                        allowed_privs = env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE | PMP_EXEC);
+                        if (mode != PRV_M && allowed_privs) {
+                            qemu_log_mask(LOG_GUEST_ERROR,
+                                          "pmp violation - s/u mode access denied\n");
+                        }
+                    }
+                } else {
+                    if ((env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE)) == PMP_WRITE) { // Shared Region
+                        allowed_privs = PMP_READ | (PRV_M ? PMP_WRITE : 0);
+                    } else {
+                        allowed_privs = env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE | PMP_EXEC);
+                        if (mode == PRV_M && allowed_privs) {
+                            qemu_log_mask(LOG_GUEST_ERROR,
+                                          "pmp violation - m mode access denied\n");
+                        }
+                    }
+                }
+            } else {
+                continue;
             }
 
             if ((privs & allowed_privs) == privs) {
