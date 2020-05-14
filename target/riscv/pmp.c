@@ -99,7 +99,22 @@ static inline uint8_t pmp_read_cfg(CPURISCVState *env, uint32_t pmp_index)
 static void pmp_write_cfg(CPURISCVState *env, uint32_t pmp_index, uint8_t val)
 {
     if (pmp_index < MAX_RISCV_PMPS) {
-        if (!pmp_is_locked(env, pmp_index)) {
+        
+        // mseccfg.RLB is set
+        bool ok = MSECCFG_RLB_ISSET(env);
+
+        // mseccfg.MML is set
+        ok = ok || (MSECCFG_MML_ISSET(env) &&
+             // m model and not adding X bit
+             (((val & PMP_LOCK) != 0 && (val & PMP_EXEC) != PMP_EXEC) ||
+             // shared region and not adding X bit
+             ((val & PMP_LOCK) != PMP_LOCK 
+             && (val & 0x7) != (PMP_WRITE | PMP_EXEC))));
+
+        // mseccfg.MML is not set
+        ok = ok || (!MSECCFG_MML_ISSET(env) && !pmp_is_locked(env, pmp_index));
+
+        if (ok) {
             env->pmp_state.pmp[pmp_index].cfg_reg = val;
             pmp_update_rule(env, pmp_index);
         } else {
@@ -230,6 +245,21 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
 
     /* Short cut if no rules */
     if (0 == pmp_get_num_rules(env)) {
+        if (MSECCFG_MMWP_ISSET(env)) {
+            qemu_log_mask(LOG_GUEST_ERROR,
+                          "pmp violation - m/s/u mode access denied\n");
+            trace_pmp_hart_has_privs_violation(
+                env->mhartid, addr, size, privs, mode);
+            return false;
+        }
+        if (MSECCFG_MML_ISSET(env) && (mode != PRV_M || (privs & PMP_EXEC))) {
+            qemu_log_mask(LOG_GUEST_ERROR,
+                          "pmp violation - m/s/u mode access denied\n");
+            trace_pmp_hart_has_privs_violation(
+                env->mhartid, addr, size, privs, mode);
+            return false;
+        }
+        trace_pmp_hart_has_privs_pass_0(env->mhartid, addr, size, privs, mode);
         return true;
     }
 
@@ -257,20 +287,64 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
             break;
         }
 
-        /* fully inside */
         const uint8_t a_field =
             pmp_get_a_field(env->pmp_state.pmp[i].cfg_reg);
 
-        /*
-         * If the PMP entry is not off and the address is in range, do the priv
-         * check
-         */
+        /* fully inside */
         if (((s + e) == 2) && (PMP_AMATCH_OFF != a_field)) {
-            allowed_privs = PMP_READ | PMP_WRITE | PMP_EXEC;
-            if ((mode != PRV_M) || pmp_is_locked(env, i)) {
-                allowed_privs &= env->pmp_state.pmp[i].cfg_reg;
+            if (!MSECCFG_MML_ISSET(env)) {
+                /*
+                * If the PMP entry is not off and the address is in range, 
+                * do the priv check
+                */
+                allowed_privs = PMP_READ | PMP_WRITE | PMP_EXEC;
+                if ((mode != PRV_M) || pmp_is_locked(env, i)) {
+                    allowed_privs &= env->pmp_state.pmp[i].cfg_reg;
+                }
+            }else{
+                /*
+                * If mseccfg.MML Bit set, do the enhanced pmp priv check
+                */
+                if (env->pmp_state.pmp[i].cfg_reg & PMP_LOCK) {
+                    // Shared Region
+                    if ((env->pmp_state.pmp[i].cfg_reg &
+                        (PMP_READ | PMP_WRITE)) == PMP_WRITE) { 
+                        allowed_privs = PMP_EXEC | ((mode == PRV_M &&
+                        (env->pmp_state.pmp[i].cfg_reg & PMP_EXEC)) ?
+                        PMP_READ : 0);
+                        trace_pmp_hart_has_privs_SR_L_M();
+                    } else {
+                        allowed_privs = env->pmp_state.pmp[i].cfg_reg &
+                        (PMP_READ | PMP_WRITE | PMP_EXEC);
+                        if (mode != PRV_M && allowed_privs) {
+                            qemu_log_mask(LOG_GUEST_ERROR,
+                                "pmp violation - s/u mode access denied\n");
+                            ret = 0;
+                            break;
+                        }
+                        trace_pmp_hart_has_privs_L_M();
+                    }
+                } else {
+                    // Shared Region
+                    if ((env->pmp_state.pmp[i].cfg_reg &
+                        (PMP_READ | PMP_WRITE)) == PMP_WRITE) { 
+                        allowed_privs = PMP_READ | ((mode == PRV_M ||
+                        (env->pmp_state.pmp[i].cfg_reg & PMP_EXEC)) ?
+                        PMP_WRITE : 0);
+                        trace_pmp_hart_has_privs_SR_NL_M();
+                    } else {
+                        allowed_privs = env->pmp_state.pmp[i].cfg_reg &
+                        (PMP_READ | PMP_WRITE | PMP_EXEC);
+                        if (mode == PRV_M && allowed_privs) {
+                            qemu_log_mask(LOG_GUEST_ERROR,
+                                    "pmp violation - m mode access denied\n");
+                            ret = 0;
+                            break;
+                        }
+                        trace_pmp_hart_has_privs_NL_M();
+                    }
+                }
             }
-
             if ((privs & allowed_privs) == privs) {
                 ret = 1;
                 break;
@@ -284,15 +358,23 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
     /* No rule matched */
     if (ret == -1) {
         if (mode == PRV_M) {
-            ret = 1; /* Privileged spec v1.10 states if no PMP entry matches an
-                      * M-Mode access, the access succeeds */
+            ret = !MSECCFG_MMWP_ISSET(env); /* PMP Enhancements */
+            if (MSECCFG_MML_ISSET(env) && (privs & PMP_EXEC)){
+                ret = 0;
+            }
         } else {
             ret = 0; /* Other modes are not allowed to succeed if they don't
                       * match a rule, but there are rules.  We've checked for
                       * no rule earlier in this function. */
         }
     }
-
+    if(ret){
+        trace_pmp_hart_has_privs_pass_M(
+            env->mhartid, addr, size, privs, mode);
+    }else{
+        trace_pmp_hart_has_privs_violation(
+            env->mhartid, addr, size, privs, mode);
+    }
     return ret == 1 ? true : false;
 }
 
@@ -379,4 +461,43 @@ target_ulong pmpaddr_csr_read(CPURISCVState *env, uint32_t addr_index)
     }
 
     return val;
+}
+
+
+/*
+ * Handle a write to a mseccfg CSR
+ */
+void mseccfg_csr_write(CPURISCVState *env, target_ulong val)
+{
+    int i;
+
+    if (!MSECCFG_RLB_ISSET(env)) {
+        for (i = 0; i < MAX_RISCV_PMPS; i++) {
+            if (pmp_is_locked(env, i)) {
+                /*
+                 * now mseccfg.rlb is zero,
+                 * and the value of mseccfg.rlb should be locked
+                 */
+                val &= ~MSECCFG_RLB;
+                break;
+            }
+        }
+    }
+
+    // sticky bit
+    val |= (env->mseccfg & (MSECCFG_MMWP | MSECCFG_MML));
+
+    env->mseccfg = val;
+    trace_mseccfg_csr_write(env->mhartid, val);
+    // todo: trace
+}
+
+
+/*
+ * Handle a read from a mseccfg CSR
+ */
+target_ulong mseccfg_csr_read(CPURISCVState *env)
+{
+    return env->mseccfg;
+    // todo: trace
 }

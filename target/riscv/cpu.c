@@ -517,7 +517,7 @@ static Property riscv_cpu_properties[] = {
     DEFINE_PROP_STRING("priv_spec", RISCVCPU, cfg.priv_spec),
     DEFINE_PROP_BOOL("mmu", RISCVCPU, cfg.mmu, true),
     DEFINE_PROP_BOOL("pmp", RISCVCPU, cfg.pmp, true),
-    DEFINE_PROP_BOOL("epmp", RISCVCPU,cfg.epmp, false),
+    DEFINE_PROP_BOOL("epmp", RISCVCPU, cfg.epmp, false),
     DEFINE_PROP_END_OF_LIST(),
 };
 
