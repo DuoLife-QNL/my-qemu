@@ -422,15 +422,15 @@ void mseccfg_csr_write(CPURISCVState *env, target_ulong val)
     if (!(env->mseccfg & PMP_MSECCFG_RLB)) {
         for (i = 0; i < MAX_RISCV_PMPS; i++) {
             if (pmp_is_locked(env, i)) {
+                // now mseeccfg.rlb is zero, and the value of mseeccfg.rlb should be locked
                 val &= ~PMP_MSECCFG_RLB;
-                val |= (env->mseccfg & PMP_MSECCFG_RLB);
                 break;
             }
         }
     }
 
-    val |= (env->mseccfg & PMP_MSECCFG_MMWP);
-    val |= (env->mseccfg & PMP_MSECCFG_MML);
+    // sticky bit
+    val |= (env->mseccfg & (PMP_MSECCFG_MMWP | PMP_MSECCFG_MML));
 
     env->mseccfg = val;
     // todo: trace
