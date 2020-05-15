@@ -100,7 +100,7 @@ static void pmp_write_cfg(CPURISCVState *env, uint32_t pmp_index, uint8_t val)
 {
     if (pmp_index < MAX_RISCV_PMPS) {
         if (((env->mseccfg & PMP_MSECCFG_RLB) || !pmp_is_locked(env, pmp_index)) ||
-            (val & 0x7) != (PMP_WRITE | PMP_EXEC)) {
+            ((env->mseccfg & PMP_MSECCFG_MML) && (val & 0x7) != (PMP_WRITE | PMP_EXEC))) {
             env->pmp_state.pmp[pmp_index].cfg_reg = val;
             pmp_update_rule(env, pmp_index);
         } else {
