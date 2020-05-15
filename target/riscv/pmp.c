@@ -324,7 +324,7 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
     /* No rule matched */
     if (ret == -1) {
         if (mode == PRV_M) {
-            ret = !(env->mseccfg & PMP_MSECCFG_MMWP); /* PMP Enhancements */
+            ret = !((env->mseccfg & PMP_MSECCFG_MMWP) || env->mseccfg & PMP_MSECCFG_MML); /* PMP Enhancements */
         } else {
             ret = 0; /* Other modes are not allowed to succeed if they don't
                       * match a rule, but there are rules.  We've checked for
