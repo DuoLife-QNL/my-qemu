@@ -230,9 +230,14 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
 
     /* Short cut if no rules */
     if (0 == pmp_get_num_rules(env)) {
-        if (mode != PRV_M || (env->mseccfg & PMP_MSECCFG_MMWP)) {
+        if (mode == PRV_M && (env->mseccfg & PMP_MSECCFG_MMWP)) {
             qemu_log_mask(LOG_GUEST_ERROR,
                           "pmp violation - m mode access denied\n");
+            return false;
+        }
+        if (mode != PRV_M && (privs & PMP_EXEC)) {
+            qemu_log_mask(LOG_GUEST_ERROR,
+                          "pmp violation - s/u mode access denied\n");
             return false;
         }
         return true;
