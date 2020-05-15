@@ -230,7 +230,7 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
 
     /* Short cut if no rules */
     if (0 == pmp_get_num_rules(env)) {
-        return mode != PRV_M || !(env->mseccfg & PMP_MSECCFG_MMWP);
+        return !(mode == PRV_M && (env->mseccfg & PMP_MSECCFG_MMWP));
     }
 
     /*
@@ -258,23 +258,27 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
         }
 
         /* fully inside */
-        const uint8_t a_field =
-            pmp_get_a_field(env->pmp_state.pmp[i].cfg_reg);
+        if ((s + e) == 2) {
 
-        /*
-         * If the PMP entry is not off and the address is in range, do the priv
-         * check
-         */
-        if (((s + e) == 2)) {
+            const uint8_t a_field =
+                pmp_get_a_field(env->pmp_state.pmp[i].cfg_reg);
+            /*
+            * If the PMP entry is not off and the address is in range, do the priv
+            * check
+            */
              if (PMP_AMATCH_OFF != a_field) {
                 allowed_privs = PMP_READ | PMP_WRITE | PMP_EXEC;
                 if ((mode != PRV_M) || pmp_is_locked(env, i)) {
                     allowed_privs &= env->pmp_state.pmp[i].cfg_reg;
                 }
+            /*
+            * If mseccfg.MML Bit set, do the enhanced pmp priv check
+            */
             } else if (env->mseccfg & PMP_MSECCFG_MML) {
                 if (pmp_is_locked(env, i)) {
                     if ((env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE)) == PMP_WRITE) { // Shared Region
-                        allowed_privs = PMP_EXEC | (PRV_M ? PMP_READ : 0);
+                        allowed_privs = PMP_EXEC |
+                                        ((mode == PRV_M && (env->pmp_state.pmp[i].cfg_reg & PMP_EXEC)) ? PMP_READ : 0);
                     } else {
                         allowed_privs = env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE | PMP_EXEC);
                         if (mode != PRV_M && allowed_privs) {
@@ -284,7 +288,8 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
                     }
                 } else {
                     if ((env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE)) == PMP_WRITE) { // Shared Region
-                        allowed_privs = PMP_READ | (PRV_M ? PMP_WRITE : 0);
+                        allowed_privs = PMP_READ | 
+                                        ((mode == PRV_M || (env->pmp_state.pmp[i].cfg_reg & PMP_EXEC)) ? PMP_WRITE : 0);
                     } else {
                         allowed_privs = env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE | PMP_EXEC);
                         if (mode == PRV_M && allowed_privs) {
