@@ -407,11 +407,11 @@ static void riscv_cpu_realize(DeviceState *dev, Error **errp)
 
     if (cpu->cfg.pmp) {
         set_feature(env, RISCV_FEATURE_PMP);
+        if (cpu->cfg.epmp) {
+            set_feature(env, RISCV_FEATURE_ePMP);
+        }
     }
 
-    if (cpu->cfg.epmp) {
-        set_feature(env, RISCV_FEATURE_ePMP);
-    }
 
     /* If misa isn't set (rv32 and rv64 machines) set it here */
     if (!env->misa) {
