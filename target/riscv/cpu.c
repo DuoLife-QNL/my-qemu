@@ -407,6 +407,10 @@ static void riscv_cpu_realize(DeviceState *dev, Error **errp)
 
     if (cpu->cfg.pmp) {
         set_feature(env, RISCV_FEATURE_PMP);
+        /* 
+         * Enhanced PMP should only be available
+         * on harts with PMP support
+         */
         if (cpu->cfg.epmp) {
             set_feature(env, RISCV_FEATURE_ePMP);
         }
