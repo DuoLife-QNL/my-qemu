@@ -247,13 +247,16 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
         if (mode == PRV_M && MSECCFG_MMWP_ISSET(env)) {
             qemu_log_mask(LOG_GUEST_ERROR,
                           "pmp violation - m mode access denied\n");
+            trace_pmp_hart_has_privs_violation(env->mhartid, addr, size, privs, mode);
             return false;
         }
         if (mode == PRV_M && MSECCFG_MML_ISSET(env) && (privs & PMP_EXEC)) {
             qemu_log_mask(LOG_GUEST_ERROR,
                           "pmp violation - s/u mode access denied\n");
+            trace_pmp_hart_has_privs_violation(env->mhartid, addr, size, privs, mode);
             return false;
         }
+        trace_pmp_hart_has_privs_pass_0(env->mhartid, addr, size, privs, mode);
         return true;
     }
 
@@ -298,7 +301,7 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
             /*
             * If mseccfg.MML Bit set, do the enhanced pmp priv check
             */
-            } else if (MSECCFG_MML_ISSET(env) {
+            } else if (MSECCFG_MML_ISSET(env)) {
                 if (pmp_is_locked(env, i)) {
                     if ((env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE)) == PMP_WRITE) { // Shared Region
                         allowed_privs = PMP_EXEC |
@@ -353,7 +356,11 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
                       * no rule earlier in this function. */
         }
     }
-
+    if(ret){
+        trace_pmp_hart_has_privs_pass_M(env->mhartid, addr, size, privs, mode);
+    }else{
+        trace_pmp_hart_has_privs_violation(env->mhartid, addr, size, privs, mode);
+    }
     return ret == 1 ? true : false;
 }
 
@@ -464,6 +471,7 @@ void mseccfg_csr_write(CPURISCVState *env, target_ulong val)
     val |= (env->mseccfg & (MSECCFG_MMWP | MSECCFG_MML));
 
     env->mseccfg = val;
+    trace_mseccfg_csr_write(env->mhartid, val);
     // todo: trace
 }
 
