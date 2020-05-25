@@ -43,11 +43,57 @@ int main(int argc, char **argv)
 #define main qemu_main
 #endif /* CONFIG_COCOA */
 
+#include <stdio.h>
+
+
+#include "../target/riscv/cpu-param.h"
+#include "../include/qemu/osdep.h"
+#include "../include/exec/cpu-defs.h"
+#include "../target/riscv/cpu.h"
+#include "../target/riscv/pmp.h"
+#include "assert.h"
+
+
 int main(int argc, char **argv, char **envp)
 {
-    qemu_init(argc, argv, envp);
-    qemu_main_loop();
-    qemu_cleanup();
+    
+//    qemu_init(argc, argv, envp);
+//    qemu_main_loop();
+//    qemu_cleanup();
+    printf("hello world\n");
+
+// pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
+    // target_ulong size, pmp_priv_t priv, target_ulong mode)
+
+    RISCVCPU *cpu = g_new0(RISCVCPU, 1);
+    CPURISCVState *env = &cpu->env;
+    
+    assert(env->pmp_state.num_rules == 0);
+
+    int32_t pmp_idx = 0;
+
+    pmpaddr_csr_write(env, pmp_idx, 0x80200000 >> 2);
+    pmpcfg_csr_write(env, pmp_idx++, PMP_READ | PMP_WRITE | (PMP_AMATCH_TOR << 3));    
+
+    printf("%d\n", env->pmp_state.num_rules);
+
+
+
+    printf("pmp_hart_has_privs(env, 0x80200000, 0, PMP_READ, PRV_M) = %d\n", pmp_hart_has_privs(env, 0x80200000, 0, PMP_READ, PRV_M));
+    printf("pmp_hart_has_privs(env, 0x80200000, 0, PMP_WRITE, PRV_M) = %d\n", pmp_hart_has_privs(env, 0x80200000, 0, PMP_WRITE, PRV_M));
+    printf("pmp_hart_has_privs(env, 0x80200000, 0, PMP_EXEC, PRV_M) = %d\n", pmp_hart_has_privs(env, 0x80200000, 0, PMP_EXEC, PRV_M));
+    printf("pmp_hart_has_privs(env, 0x80200000, 0, PMP_READ, PRV_U) = %d\n", pmp_hart_has_privs(env, 0x80200000, 0, PMP_READ, PRV_U));
+    printf("pmp_hart_has_privs(env, 0x80200000, 0, PMP_WRITE, PRV_U) = %d\n", pmp_hart_has_privs(env, 0x80200000, 0, PMP_WRITE, PRV_U));
+    printf("pmp_hart_has_privs(env, 0x80200000, 0, PMP_EXEC, PRV_U) = %d\n", pmp_hart_has_privs(env, 0x80200000, 0, PMP_EXEC, PRV_U));
+
+    printf("pmp_hart_has_privs(env, 0x80100000, 0, PMP_READ, PRV_M) = %d\n", pmp_hart_has_privs(env, 0x80100000, 0, PMP_READ, PRV_M));
+    printf("pmp_hart_has_privs(env, 0x80100000, 0, PMP_WRITE, PRV_M) = %d\n", pmp_hart_has_privs(env, 0x80100000, 0, PMP_WRITE, PRV_M));
+    printf("pmp_hart_has_privs(env, 0x80100000, 0, PMP_EXEC, PRV_M) = %d\n", pmp_hart_has_privs(env, 0x80100000, 0, PMP_EXEC, PRV_M));
+    printf("pmp_hart_has_privs(env, 0x80100000, 0, PMP_READ, PRV_U) = %d\n", pmp_hart_has_privs(env, 0x80100000, 0, PMP_READ, PRV_U));
+    printf("pmp_hart_has_privs(env, 0x80100000, 0, PMP_WRITE, PRV_U) = %d\n", pmp_hart_has_privs(env, 0x80100000, 0, PMP_WRITE, PRV_U));
+    printf("pmp_hart_has_privs(env, 0x80100000, 0, PMP_EXEC, PRV_U) = %d\n", pmp_hart_has_privs(env, 0x80100000, 0, PMP_EXEC, PRV_U));
+
+    g_free(cpu);
 
     return 0;
 }
