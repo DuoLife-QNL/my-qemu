@@ -72,8 +72,21 @@ int main(int argc, char **argv, char **envp)
 
     int32_t pmp_idx = 0;
 
-    pmpaddr_csr_write(env, pmp_idx, 0x80200000 >> 2);
-    pmpcfg_csr_write(env, pmp_idx++, PMP_READ | PMP_WRITE | (PMP_AMATCH_TOR << 3));    
+
+    pmpaddr_csr_write(env, 0, 0x80200000 >> 2);
+    pmpcfg_csr_write(env, 0, PMP_READ | PMP_WRITE | (PMP_AMATCH_TOR << 3));    
+    
+    uint64_t val8 = PMP_READ | PMP_WRITE | (PMP_AMATCH_TOR << 3);
+    uint64_t val16 = val8 << 8 | val8;
+    uint64_t val32 = val16 << 16 | val16;
+    uint64_t val64 = val32 << 32 | val32;
+    for (int i = 0; i < 16; i++){
+        pmpaddr_csr_write(env, pmp_idx++, (0x80200000 | (0x00200000 + 0x00100000 * i)) >> 2);    
+    }
+        // pmpcfg_csr_write(env, 0, val64 & ((a << 56) - 1));
+    pmpcfg_csr_write(env, 0, val64);
+
+    pmpcfg_csr_write(env, 2, val64);
 
     printf("%d\n", env->pmp_state.num_rules);
 
