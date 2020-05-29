@@ -45,7 +45,6 @@ int main(int argc, char **argv)
 
 #include <stdio.h>
 
-
 #include "../target/riscv/cpu-param.h"
 #include "../include/qemu/osdep.h"
 #include "../include/exec/cpu-defs.h"
@@ -53,17 +52,53 @@ int main(int argc, char **argv)
 #include "../target/riscv/pmp.h"
 #include "assert.h"
 
+void pmpcfg_set_value(CPURISCVState *env, int idx, uint64_t val);
+void assert_exact(CPURISCVState *env, int idx, uint8_t priv, uint64_t mode);
+
+void pmpcfg_set_value(CPURISCVState *env, int idx, uint64_t val) {
+    uint64_t raw_val = pmpcfg_csr_read(env, (idx >> 3) << 1);
+
+    int xidx = idx & 7;
+    raw_val &= ~(0xffULL << (xidx << 3));
+    raw_val |= (val << (xidx << 3));
+    pmpcfg_csr_write(env, (idx >> 3) << 1, raw_val);
+}
+
+uint64_t testing_addr[18];
+
+void assert_exact(CPURISCVState *env, int idx, uint8_t priv, uint64_t mode) {
+    printf("ok: ");
+    int x = 0;
+    for(int sub_priv = priv; sub_priv; sub_priv = (sub_priv-1) & priv)
+    {
+        printf("%3x ", sub_priv);
+        fflush(stdout);
+        assert(pmp_hart_has_privs(env, testing_addr[idx], 0, sub_priv, mode));
+        x++;
+    }
+    priv = 0x7 ^ priv;
+
+    for(;x < 7;x++)
+    {
+        printf("    ");
+    }
+
+    printf("vio: ");
+    for(int sub_priv = priv; sub_priv; sub_priv = (sub_priv-1) & priv)
+    {
+        printf("%3x ", sub_priv);
+        fflush(stdout);
+        assert(!pmp_hart_has_privs(env, testing_addr[idx], 0, sub_priv, mode));
+    }
+    printf("\n");
+}
+
+#define assert_exact_test(idx, priv, mode) printf("calling assert_exact(%d, %d, %llu): ", idx, priv, (long long unsigned int)(mode));\
+    assert_exact(env, idx, priv, mode)
+
 
 int main(int argc, char **argv, char **envp)
 {
-    
-//    qemu_init(argc, argv, envp);
-//    qemu_main_loop();
-//    qemu_cleanup();
-    printf("hello world\n");
-
-// pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
-    // target_ulong size, pmp_priv_t priv, target_ulong mode)
 
     RISCVCPU *cpu = g_new0(RISCVCPU, 1);
     CPURISCVState *env = &cpu->env;
@@ -76,35 +111,113 @@ int main(int argc, char **argv, char **envp)
     pmpaddr_csr_write(env, 0, 0x80200000 >> 2);
     pmpcfg_csr_write(env, 0, PMP_READ | PMP_WRITE | (PMP_AMATCH_TOR << 3));    
     
-    uint64_t val8 = PMP_READ | PMP_WRITE | (PMP_AMATCH_TOR << 3);
-    uint64_t val16 = val8 << 8 | val8;
-    uint64_t val32 = val16 << 16 | val16;
-    uint64_t val64 = val32 << 32 | val32;
     for (int i = 0; i < 16; i++){
-        pmpaddr_csr_write(env, pmp_idx++, (0x80200000 | (0x00200000 + 0x00100000 * i)) >> 2);    
+        pmpaddr_csr_write(env, pmp_idx++, (0x80200000 + (0x00200000 + 0x00100000 * i)) >> 2);   
+        testing_addr[i] = (0x80200000 + (0x00200000 + 0x00100000 * i)) - 1; 
     }
-        // pmpcfg_csr_write(env, 0, val64 & ((a << 56) - 1));
-    pmpcfg_csr_write(env, 0, val64);
+    pmp_idx = 0;
 
-    pmpcfg_csr_write(env, 2, val64);
-
+    // 0
+    pmpcfg_set_value(env, pmp_idx++, PMP_READ | PMP_EXEC | PMP_WRITE | 0        | (PMP_AMATCH_TOR << 3));
+    pmpcfg_set_value(env, pmp_idx++, PMP_READ | PMP_EXEC | PMP_WRITE | PMP_LOCK | (PMP_AMATCH_TOR << 3));
+    pmpcfg_set_value(env, pmp_idx++, PMP_READ | 0        | PMP_WRITE | 0        | (PMP_AMATCH_TOR << 3));
+    pmpcfg_set_value(env, pmp_idx++, 0        | PMP_EXEC | PMP_WRITE | 0        | (PMP_AMATCH_TOR << 3));
+    
+    // 4
+    pmpcfg_set_value(env, pmp_idx++, PMP_READ | 0        | 0         | 0        | (PMP_AMATCH_TOR << 3));
+    pmpcfg_set_value(env, pmp_idx++, 0        | PMP_EXEC | 0         | 0        | (PMP_AMATCH_TOR << 3));
+    pmpcfg_set_value(env, pmp_idx++, 0        | 0        | PMP_WRITE | 0        | (PMP_AMATCH_TOR << 3));
+    pmpcfg_set_value(env, pmp_idx++, 0        | 0        | 0         | 0        | (PMP_AMATCH_TOR << 3));
+    
+    // 8
+    pmpcfg_set_value(env, pmp_idx++, PMP_READ | 0        | 0         | 0        | (PMP_AMATCH_TOR << 3));
+    pmpcfg_set_value(env, pmp_idx++, PMP_READ | 0        | 0         | PMP_LOCK | (PMP_AMATCH_TOR << 3));
+    
     printf("%d\n", env->pmp_state.num_rules);
+    
+    env->mseccfg = 0;
+    printf("env->mseccfg = 0;\n");
+    
+    // no bits of mseccfg is set
 
+    // 0
+    // pmpcfg_set_value(env, pmp_idx++, PMP_READ | PMP_EXEC | PMP_WRITE | 0        | (PMP_AMATCH_TOR << 3));
+    // pmpcfg_set_value(env, pmp_idx++, PMP_READ | PMP_EXEC | PMP_WRITE | PMP_LOCK | (PMP_AMATCH_TOR << 3));
+    // pmpcfg_set_value(env, pmp_idx++, PMP_READ | 0        | PMP_WRITE | 0        | (PMP_AMATCH_TOR << 3));
+    // pmpcfg_set_value(env, pmp_idx++, 0        | PMP_EXEC | PMP_WRITE | 0        | (PMP_AMATCH_TOR << 3));
 
+    assert_exact_test(0, PMP_READ | PMP_EXEC | PMP_WRITE, PRV_M);
+    assert_exact_test(0, PMP_READ | PMP_EXEC | PMP_WRITE, PRV_S);
+    assert_exact_test(1, PMP_READ | PMP_EXEC | PMP_WRITE, PRV_M);
+    assert_exact_test(1, PMP_READ | PMP_EXEC | PMP_WRITE, PRV_S);
+    assert_exact_test(2, PMP_READ | PMP_EXEC | PMP_WRITE, PRV_M);
+    assert_exact_test(2, PMP_READ | 0        | PMP_WRITE, PRV_S);
+    assert_exact_test(3, PMP_READ | PMP_EXEC | PMP_WRITE, PRV_M);
+    assert_exact_test(3, 0        | PMP_EXEC | PMP_WRITE, PRV_S);
+    
+    // 4
+    // pmpcfg_set_value(env, pmp_idx++, PMP_READ | 0        | 0         | 0        | (PMP_AMATCH_TOR << 3));
+    // pmpcfg_set_value(env, pmp_idx++, 0        | PMP_EXEC | 0         | 0        | (PMP_AMATCH_TOR << 3));
+    // pmpcfg_set_value(env, pmp_idx++, 0        | 0        | PMP_WRITE | 0        | (PMP_AMATCH_TOR << 3));
+    // pmpcfg_set_value(env, pmp_idx++, 0        | 0        | 0         | 0        | (PMP_AMATCH_TOR << 3));
 
-    printf("pmp_hart_has_privs(env, 0x80200000, 0, PMP_READ, PRV_M) = %d\n", pmp_hart_has_privs(env, 0x80200000, 0, PMP_READ, PRV_M));
-    printf("pmp_hart_has_privs(env, 0x80200000, 0, PMP_WRITE, PRV_M) = %d\n", pmp_hart_has_privs(env, 0x80200000, 0, PMP_WRITE, PRV_M));
-    printf("pmp_hart_has_privs(env, 0x80200000, 0, PMP_EXEC, PRV_M) = %d\n", pmp_hart_has_privs(env, 0x80200000, 0, PMP_EXEC, PRV_M));
-    printf("pmp_hart_has_privs(env, 0x80200000, 0, PMP_READ, PRV_U) = %d\n", pmp_hart_has_privs(env, 0x80200000, 0, PMP_READ, PRV_U));
-    printf("pmp_hart_has_privs(env, 0x80200000, 0, PMP_WRITE, PRV_U) = %d\n", pmp_hart_has_privs(env, 0x80200000, 0, PMP_WRITE, PRV_U));
-    printf("pmp_hart_has_privs(env, 0x80200000, 0, PMP_EXEC, PRV_U) = %d\n", pmp_hart_has_privs(env, 0x80200000, 0, PMP_EXEC, PRV_U));
+    assert_exact_test(4, PMP_READ | PMP_EXEC | PMP_WRITE, PRV_M);
+    assert_exact_test(4, PMP_READ | 0        | 0        , PRV_S);
+    assert_exact_test(5, PMP_READ | PMP_EXEC | PMP_WRITE, PRV_M);
+    assert_exact_test(5, 0        | PMP_EXEC | 0        , PRV_S);
+    assert_exact_test(6, PMP_READ | PMP_EXEC | PMP_WRITE, PRV_M);
+    assert_exact_test(6, 0        | 0        | PMP_WRITE, PRV_S);
+    assert_exact_test(7, PMP_READ | PMP_EXEC | PMP_WRITE, PRV_M);
+    assert_exact_test(7, 0        | 0        | 0        , PRV_S);
 
-    printf("pmp_hart_has_privs(env, 0x80100000, 0, PMP_READ, PRV_M) = %d\n", pmp_hart_has_privs(env, 0x80100000, 0, PMP_READ, PRV_M));
-    printf("pmp_hart_has_privs(env, 0x80100000, 0, PMP_WRITE, PRV_M) = %d\n", pmp_hart_has_privs(env, 0x80100000, 0, PMP_WRITE, PRV_M));
-    printf("pmp_hart_has_privs(env, 0x80100000, 0, PMP_EXEC, PRV_M) = %d\n", pmp_hart_has_privs(env, 0x80100000, 0, PMP_EXEC, PRV_M));
-    printf("pmp_hart_has_privs(env, 0x80100000, 0, PMP_READ, PRV_U) = %d\n", pmp_hart_has_privs(env, 0x80100000, 0, PMP_READ, PRV_U));
-    printf("pmp_hart_has_privs(env, 0x80100000, 0, PMP_WRITE, PRV_U) = %d\n", pmp_hart_has_privs(env, 0x80100000, 0, PMP_WRITE, PRV_U));
-    printf("pmp_hart_has_privs(env, 0x80100000, 0, PMP_EXEC, PRV_U) = %d\n", pmp_hart_has_privs(env, 0x80100000, 0, PMP_EXEC, PRV_U));
+    // 8
+    // pmpcfg_set_value(env, pmp_idx++, PMP_READ | 0        | 0         | 0        | (PMP_AMATCH_TOR << 3));
+    // pmpcfg_set_value(env, pmp_idx++, PMP_READ | 0        | 0         | PMP_LOCK | (PMP_AMATCH_TOR << 3));
+
+    assert_exact_test(9, PMP_READ | 0        | 0        , PRV_M);
+    assert_exact_test(9, PMP_READ | 0        | 0        , PRV_S);
+
+    env->mseccfg = MSECCFG_MML;
+    printf("env->mseccfg = MSECCFG_MML;\n");
+
+    // 0
+    // pmpcfg_set_value(env, pmp_idx++, PMP_READ | PMP_EXEC | PMP_WRITE | 0        | (PMP_AMATCH_TOR << 3));
+    // pmpcfg_set_value(env, pmp_idx++, PMP_READ | PMP_EXEC | PMP_WRITE | PMP_LOCK | (PMP_AMATCH_TOR << 3));
+    // pmpcfg_set_value(env, pmp_idx++, PMP_READ | 0        | PMP_WRITE | 0        | (PMP_AMATCH_TOR << 3));
+    // pmpcfg_set_value(env, pmp_idx++, 0        | PMP_EXEC | PMP_WRITE | 0        | (PMP_AMATCH_TOR << 3));
+
+    assert_exact_test(0, 0        | 0        | 0        , PRV_M);
+    assert_exact_test(0, PMP_READ | PMP_EXEC | PMP_WRITE, PRV_S);
+    assert_exact_test(1, PMP_READ | PMP_EXEC | PMP_WRITE, PRV_M);
+    assert_exact_test(1, 0        | 0        | 0        , PRV_S);
+    assert_exact_test(2, 0        | 0        | 0        , PRV_M);
+    assert_exact_test(2, PMP_READ | 0        | PMP_WRITE, PRV_S);
+    assert_exact_test(3, PMP_READ | 0        | PMP_WRITE, PRV_M);
+    assert_exact_test(3, PMP_READ | 0        | PMP_WRITE, PRV_S);
+    
+    // 4
+    // pmpcfg_set_value(env, pmp_idx++, PMP_READ | 0        | 0         | 0        | (PMP_AMATCH_TOR << 3));
+    // pmpcfg_set_value(env, pmp_idx++, 0        | PMP_EXEC | 0         | 0        | (PMP_AMATCH_TOR << 3));
+    // pmpcfg_set_value(env, pmp_idx++, 0        | 0        | PMP_WRITE | 0        | (PMP_AMATCH_TOR << 3));
+    // pmpcfg_set_value(env, pmp_idx++, 0        | 0        | 0         | 0        | (PMP_AMATCH_TOR << 3));
+
+    assert_exact_test(4, 0        | 0        | 0        , PRV_M);
+    assert_exact_test(4, PMP_READ | 0        | 0        , PRV_S);
+    assert_exact_test(5, 0        | 0        | 0        , PRV_M);
+    assert_exact_test(5, 0        | PMP_EXEC | 0        , PRV_S);
+    assert_exact_test(6, PMP_READ | 0        | PMP_WRITE, PRV_M);
+    assert_exact_test(6, PMP_READ | 0        | 0        , PRV_S);
+    assert_exact_test(7, 0        | 0        | 0        , PRV_M);
+    assert_exact_test(7, 0        | 0        | 0        , PRV_S);
+
+    // 8
+    // pmpcfg_set_value(env, pmp_idx++, PMP_READ | 0        | 0         | 0        | (PMP_AMATCH_TOR << 3));
+    // pmpcfg_set_value(env, pmp_idx++, PMP_READ | 0        | 0         | PMP_LOCK | (PMP_AMATCH_TOR << 3));
+
+    assert_exact_test(9, PMP_READ | 0        | 0        , PRV_M);
+    assert_exact_test(9, 0        | 0        | 0        , PRV_S);
+
+    printf("all test cases pass\n");
 
     g_free(cpu);
 
