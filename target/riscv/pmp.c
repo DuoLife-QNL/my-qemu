@@ -303,7 +303,7 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
                     /*
                     * If mseccfg.MML Bit set, do the enhanced pmp priv check
                     */
-                    if (pmp_is_locked(env, i)) {
+                    if (env->pmp_state.pmp[i].cfg_reg & PMP_LOCK) {
                         if ((env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE)) == PMP_WRITE) { // Shared Region
                             allowed_privs = PMP_EXEC |
                                             ((mode == PRV_M && (env->pmp_state.pmp[i].cfg_reg & PMP_EXEC)) ? PMP_READ : 0);
