@@ -284,61 +284,56 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
             break;
         }
 
-        /* fully inside */
-        if ((s + e) == 2) {
+        const uint8_t a_field =
+            pmp_get_a_field(env->pmp_state.pmp[i].cfg_reg);
 
-            const uint8_t a_field =
-                pmp_get_a_field(env->pmp_state.pmp[i].cfg_reg);
-            /*
-            * If the PMP entry is not off and the address is in range, do the priv
-            * check
-            */
-            if (PMP_AMATCH_OFF != a_field) {
-                if (!MSECCFG_MML_ISSET(env)) {
-                    allowed_privs = PMP_READ | PMP_WRITE | PMP_EXEC;
-                    if ((mode != PRV_M) || pmp_is_locked(env, i)) {
-                        allowed_privs &= env->pmp_state.pmp[i].cfg_reg;
-                    }
-                }else{
-                    /*
-                    * If mseccfg.MML Bit set, do the enhanced pmp priv check
-                    */
-                    if (pmp_is_locked(env, i)) {
-                        if ((env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE)) == PMP_WRITE) { // Shared Region
-                            allowed_privs = PMP_EXEC |
-                                            ((mode == PRV_M && (env->pmp_state.pmp[i].cfg_reg & PMP_EXEC)) ? PMP_READ : 0);
-                            trace_pmp_hart_has_privs_SR_L_M();
-                        } else {
-                            allowed_privs = env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE | PMP_EXEC);
-                            if (mode != PRV_M && allowed_privs) {
-                                qemu_log_mask(LOG_GUEST_ERROR,
-                                            "pmp violation - s/u mode access denied\n");
-                                ret = 0;
-                                break;
-                            }
-                            trace_pmp_hart_has_privs_L_M();
-                        }
+        /* fully inside */
+        if (((s + e) == 2) && (PMP_AMATCH_OFF != a_field)) {
+            if (!MSECCFG_MML_ISSET(env)) {
+                /*
+                * If the PMP entry is not off and the address is in range, do the priv
+                * check
+                */
+                allowed_privs = PMP_READ | PMP_WRITE | PMP_EXEC;
+                if ((mode != PRV_M) || pmp_is_locked(env, i)) {
+                    allowed_privs &= env->pmp_state.pmp[i].cfg_reg;
+                }
+            }else{
+                /*
+                * If mseccfg.MML Bit set, do the enhanced pmp priv check
+                */
+                if (env->pmp_state.pmp[i].cfg_reg & PMP_LOCK) {
+                    if ((env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE)) == PMP_WRITE) { // Shared Region
+                        allowed_privs = PMP_EXEC |
+                                        ((mode == PRV_M && (env->pmp_state.pmp[i].cfg_reg & PMP_EXEC)) ? PMP_READ : 0);
+                        trace_pmp_hart_has_privs_SR_L_M();
                     } else {
-                        if ((env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE)) == PMP_WRITE) { // Shared Region
-                            allowed_privs = PMP_READ | 
-                                            ((mode == PRV_M || (env->pmp_state.pmp[i].cfg_reg & PMP_EXEC)) ? PMP_WRITE : 0);
-                            trace_pmp_hart_has_privs_SR_NL_M();
-                        } else {
-                            allowed_privs = env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE | PMP_EXEC);
-                            if (mode == PRV_M && allowed_privs) {
-                                qemu_log_mask(LOG_GUEST_ERROR,
-                                            "pmp violation - m mode access denied\n");
-                                ret = 0;
-                                break;
-                            }
-                            trace_pmp_hart_has_privs_NL_M();
+                        allowed_privs = env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE | PMP_EXEC);
+                        if (mode != PRV_M && allowed_privs) {
+                            qemu_log_mask(LOG_GUEST_ERROR,
+                                        "pmp violation - s/u mode access denied\n");
+                            ret = 0;
+                            break;
                         }
+                        trace_pmp_hart_has_privs_L_M();
+                    }
+                } else {
+                    if ((env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE)) == PMP_WRITE) { // Shared Region
+                        allowed_privs = PMP_READ | 
+                                        ((mode == PRV_M || (env->pmp_state.pmp[i].cfg_reg & PMP_EXEC)) ? PMP_WRITE : 0);
+                        trace_pmp_hart_has_privs_SR_NL_M();
+                    } else {
+                        allowed_privs = env->pmp_state.pmp[i].cfg_reg & (PMP_READ | PMP_WRITE | PMP_EXEC);
+                        if (mode == PRV_M && allowed_privs) {
+                            qemu_log_mask(LOG_GUEST_ERROR,
+                                        "pmp violation - m mode access denied\n");
+                            ret = 0;
+                            break;
+                        }
+                        trace_pmp_hart_has_privs_NL_M();
                     }
                 }
-            } else {
-                continue;
             }
-
             if ((privs & allowed_privs) == privs) {
                 ret = 1;
                 break;
