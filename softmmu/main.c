@@ -52,8 +52,82 @@ int main(int argc, char **argv)
 #include "../target/riscv/pmp.h"
 #include "assert.h"
 
+// epmp documentation https://docs.google.com/document/d/1kmHBwR8soAP3hXRXVBLrWS85bl0rnEBNXpm7HcxIPS8/edit#
+
+// test of behavior of cpu about mseccfg.RLB
+// 1/epmp.2a) When mseccfg.RLB is set PMP rules with pmpcfg.L bit set can be removed and/or edited.
+// 2/epmp.2b) When mseccfg.RLB is unset and at least one rule with pmpcfg.L is set, mseccfg.RLB is
+//            locked and any further modifications to mseccfg.RLB are ignored (WARL).
+int32_t pmp_rlb_test(void);
+
+// test of behavior of cpu about mseccfg.MMWP
+// 1/epmp.3)  This is a sticky bit, meaning that once set it cannot be unset until a hard reset.
+int32_t pmp_mmwp_test(void);
+
+// test of behavior of cpu about mseccfg.MML
+// 1/epmp.4)  This is a sticky bit, meaning that once set it cannot be unset until a hard reset.
+// 1/epmp.4b) Adding a new M-mode-only or a Shared-Region rule with executable privileges is not
+//            possible and such pmpcfg writes are ignored, leaving pmpcfg unchanged. This
+//            restriction can be temporarily lifted e.g. during the boot process, by setting mseccfg.RLB.
+int32_t pmp_mml_test(void);
+
+// test of pmp_hart_has_privs
+// 1)         mseccfg = 0, it meets the requirements of pmp
+// 2)         mseccfg = MML, it meets the requirements of truth table when mseccfg.MML is set
+//            mentioned in epmp doc.
+// 3/epmp.4c) mseccfg = MML, Executing code with Machine mode privileges is only possible from
+//            memory regions with a matching M-mode-only rule or a Shared-Region rule with
+//            executable privileges. Executing ((with Machine mode)) code from a region without a
+//            matching rule or with a matching S/U-mode-only rule is denied.
+// 3/epmp.3)  mseccfg = MMWP, it changes the default PMP policy for M-mode when accessing
+//            memory regions that don’t have a matching PMP rule, to denied instead of ignored.
+int32_t pmp_hart_has_privs_test(void);
+
+int32_t aux_run_pmp_test(const char * test_prefix, int32_t *code, int32_t (*test_func)(void));
+
+#define run_pmp_test(prefix) aux_run_pmp_test("pmp_" #prefix, &code, pmp_ ## prefix ## _test);
+
+int main(int argc, char **argv, char **envp)
+{
+    int code = 0;
+
+    run_pmp_test(rlb);
+    run_pmp_test(mmwp);
+    run_pmp_test(mml);
+    run_pmp_test(hart_has_privs);
+
+    if (code) printf("all test cases pass\n");
+
+    return code;
+}
+
+#undef run_pmp_test
+
+int32_t aux_run_pmp_test(const char * test_prefix, int32_t *code, int32_t (*test_func)(void)) {
+    if (*code) return *code;
+    printf("================================================================================\n");
+    printf("begin test %s\n", test_prefix);
+    fflush(stdout);
+    
+    *code = test_func();
+
+    printf("test %s %s\n", test_prefix, *code ? "failed" : "passed");
+    printf("================================================================================\n");
+    fflush(stdout);
+        
+
+    return *code;
+}
+
+
+// set pmpcfg[idx] value to val
 void pmpcfg_set_value(CPURISCVState *env, int idx, uint64_t val);
+
+// assert when accessing address between range [pmpaddr[idx-1], pmpaddr[idx]],
+// pmp_hart_has_privs should exact allow a subset privilege of priv under mode (m/s/u mode)
 void assert_exact(CPURISCVState *env, int idx, uint8_t priv, uint64_t mode);
+
+uint64_t testing_addr[18];
 
 void pmpcfg_set_value(CPURISCVState *env, int idx, uint64_t val) {
     uint64_t raw_val = pmpcfg_csr_read(env, (idx >> 3) << 1);
@@ -63,8 +137,6 @@ void pmpcfg_set_value(CPURISCVState *env, int idx, uint64_t val) {
     raw_val |= (val << (xidx << 3));
     pmpcfg_csr_write(env, (idx >> 3) << 1, raw_val);
 }
-
-uint64_t testing_addr[18];
 
 void assert_exact(CPURISCVState *env, int idx, uint8_t priv, uint64_t mode) {
     printf("ok: ");
@@ -96,10 +168,8 @@ void assert_exact(CPURISCVState *env, int idx, uint8_t priv, uint64_t mode) {
 #define assert_exact_test(idx, priv, mode) printf("calling assert_exact(%d, %d, %llu): ", idx, priv, (long long unsigned int)(mode));\
     assert_exact(env, idx, priv, mode)
 
-
-int main(int argc, char **argv, char **envp)
-{
-
+int32_t pmp_hart_has_privs_test(void) {
+    
     RISCVCPU *cpu = g_new0(RISCVCPU, 1);
     CPURISCVState *env = &cpu->env;
     
@@ -107,16 +177,18 @@ int main(int argc, char **argv, char **envp)
 
     int32_t pmp_idx = 0;
 
-
-    pmpaddr_csr_write(env, 0, 0x80200000 >> 2);
-    pmpcfg_csr_write(env, 0, PMP_READ | PMP_WRITE | (PMP_AMATCH_TOR << 3));    
-    
     for (int i = 0; i < 16; i++){
         pmpaddr_csr_write(env, pmp_idx++, (0x80200000 + (0x00200000 + 0x00100000 * i)) >> 2);   
         testing_addr[i] = (0x80200000 + (0x00200000 + 0x00100000 * i)) - 1; 
     }
     pmp_idx = 0;
+    
+    env->mseccfg = 0;
+    printf("env->mseccfg = 0; no rule set\n");
 
+    
+
+    printf("rules setting, please check code between line %d", __LINE__);
     // 0
     pmpcfg_set_value(env, pmp_idx++, PMP_READ | PMP_EXEC | PMP_WRITE | 0        | (PMP_AMATCH_TOR << 3));
     pmpcfg_set_value(env, pmp_idx++, PMP_READ | PMP_EXEC | PMP_WRITE | PMP_LOCK | (PMP_AMATCH_TOR << 3));
@@ -132,11 +204,12 @@ int main(int argc, char **argv, char **envp)
     // 8
     pmpcfg_set_value(env, pmp_idx++, PMP_READ | 0        | 0         | 0        | (PMP_AMATCH_TOR << 3));
     pmpcfg_set_value(env, pmp_idx++, PMP_READ | 0        | 0         | PMP_LOCK | (PMP_AMATCH_TOR << 3));
+
+    printf(" and %d\n", __LINE__);
     
-    printf("%d\n", env->pmp_state.num_rules);
-    
+    assert(env->pmp_state.num_rules == 10);
     env->mseccfg = 0;
-    printf("env->mseccfg = 0;\n");
+    printf("env->mseccfg = 0; 10 rule set\n");
     
     // no bits of mseccfg is set
 
@@ -178,7 +251,7 @@ int main(int argc, char **argv, char **envp)
     assert_exact_test(9, PMP_READ | 0        | 0        , PRV_S);
 
     env->mseccfg = MSECCFG_MML;
-    printf("env->mseccfg = MSECCFG_MML;\n");
+    printf("env->mseccfg = MSECCFG_MML; 10 rule set\n");
 
     // 0
     // pmpcfg_set_value(env, pmp_idx++, PMP_READ | PMP_EXEC | PMP_WRITE | 0        | (PMP_AMATCH_TOR << 3));
@@ -217,9 +290,18 @@ int main(int argc, char **argv, char **envp)
     assert_exact_test(9, PMP_READ | 0        | 0        , PRV_M);
     assert_exact_test(9, 0        | 0        | 0        , PRV_S);
 
-    printf("all test cases pass\n");
-
     g_free(cpu);
+    return 0;
+}
 
+int32_t pmp_rlb_test(void) {
+    return 0;
+}
+
+int32_t pmp_mmwp_test(void) {
+    return 0;
+}
+
+int32_t pmp_mml_test(void) {
     return 0;
 }
