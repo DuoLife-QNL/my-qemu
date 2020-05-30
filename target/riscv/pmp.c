@@ -105,10 +105,10 @@ static void pmp_write_cfg(CPURISCVState *env, uint32_t pmp_index, uint8_t val)
 
         // mseccfg.MML is set
         ok = ok || (MSECCFG_MML_ISSET(env) &&
-             // shared region and not adding X bit
-             ((val & 0x7) != (PMP_WRITE | PMP_EXEC) ||
              // m model and not adding X bit
-              (pmp_is_locked(env, pmp_index) && (val & PMP_EXEC) != PMP_EXEC)));
+             (((val & PMP_LOCK) != 0 && (val & PMP_EXEC) != PMP_EXEC) ||
+             // shared region and not adding X bit
+              ((val & PMP_LOCK) != PMP_LOCK && (val & 0x7) != (PMP_WRITE | PMP_EXEC))));
 
         // mseccfg.MML is not set
         ok = ok || (!MSECCFG_MML_ISSET(env) && !pmp_is_locked(env, pmp_index));
@@ -244,15 +244,15 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
 
     /* Short cut if no rules */
     if (0 == pmp_get_num_rules(env)) {
-        if (mode == PRV_M && MSECCFG_MMWP_ISSET(env)) {
+        if (MSECCFG_MMWP_ISSET(env)) {
             qemu_log_mask(LOG_GUEST_ERROR,
-                          "pmp violation - m mode access denied\n");
+                          "pmp violation - m/s/u mode access denied\n");
             trace_pmp_hart_has_privs_violation(env->mhartid, addr, size, privs, mode);
             return false;
         }
-        if (mode == PRV_M && MSECCFG_MML_ISSET(env) && (privs & PMP_EXEC)) {
+        if (MSECCFG_MML_ISSET(env) && (mode != PRV_M || (privs & PMP_EXEC))) {
             qemu_log_mask(LOG_GUEST_ERROR,
-                          "pmp violation - s/u mode access denied\n");
+                          "pmp violation - m/s/u mode access denied\n");
             trace_pmp_hart_has_privs_violation(env->mhartid, addr, size, privs, mode);
             return false;
         }
