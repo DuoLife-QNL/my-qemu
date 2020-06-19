@@ -132,6 +132,7 @@ static int csr_register_map[] = {
     CSR_MIP,
     CSR_MTINST,
     CSR_MTVAL2,
+    CSR_MSECCFG,
     CSR_PMPCFG0,
     CSR_PMPCFG1,
     CSR_PMPCFG2,

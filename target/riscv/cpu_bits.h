@@ -215,6 +215,8 @@
 #define CSR_MTVAL2          0x34b
 
 /* Physical Memory Protection */
+/* ePMP (for test) */
+#define CSR_MSECCFG         0x390
 #define CSR_PMPCFG0         0x3a0
 #define CSR_PMPCFG1         0x3a1
 #define CSR_PMPCFG2         0x3a2
